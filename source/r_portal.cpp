@@ -95,10 +95,9 @@ static pwindow_t *unusedhead = NULL, *windowhead = NULL, *windowlast = NULL;
 //
 VALLOCATION(portals)
 {
+   planehash_t *hash;
    for(portal_t *p = portals; p; p = p->next)
    {
-      planehash_t *hash;
-
       // clear portal overlay visplane hash tables
       if((hash = p->poverlay))
       {
@@ -118,6 +117,9 @@ VALLOCATION(portals)
       while(child)
       {
          next = child->child;
+         if((hash = child->poverlay))
+            for(int i = 0; i < hash->chaincount; ++i)
+               hash->chains[i] = nullptr;
          efree(child->top);
          efree(child);
          child = next;
@@ -125,6 +127,9 @@ VALLOCATION(portals)
 
       // free this window
       next = rover->next;
+      if((hash = rover->poverlay))
+         for(int i = 0; i < hash->chaincount; ++i)
+            hash->chains[i] = nullptr;
       efree(rover->top);
       efree(rover);
       rover = next;
@@ -135,6 +140,9 @@ VALLOCATION(portals)
    while(rover)
    {
       pwindow_t *next = rover->next;
+      if((hash = rover->poverlay))
+         for(int i = 0; i < hash->chaincount; ++i)
+            hash->chains[i] = nullptr;
       efree(rover->top);
       efree(rover);
       rover = next;
@@ -157,7 +165,7 @@ static void R_RenderPortalNOP(pwindow_t *window)
 
 static void R_SetPortalFunction(pwindow_t *window);
 
-static void R_ClearPortalWindow(pwindow_t *window)
+static void R_ClearPortalWindow(pwindow_t *window, bool noplanes)
 {
    window->maxx = 0;
    window->minx = viewwindow.width - 1;
@@ -177,9 +185,21 @@ static void R_ClearPortalWindow(pwindow_t *window)
    window->vx = window->vy = window->vz = 0;
    window->vangle = 0;
    memset(&window->barrier, 0, sizeof(window->barrier));
+   if(!noplanes)
+   {
+      if(!window->poverlay)
+         window->poverlay = R_NewOverlaySet();
+      else
+      {
+         R_ClearPlaneHash(window->poverlay);
+#ifdef RANGECHECK
+         I_Error("Non-null window overlay set\n");
+#endif
+      }
+   }
 }
 
-static pwindow_t *newPortalWindow()
+static pwindow_t *newPortalWindow(bool noplanes = false)
 {
    pwindow_t *ret;
 
@@ -197,7 +217,7 @@ static pwindow_t *newPortalWindow()
       ret->bottom = buf + video.width;
    }
 
-   R_ClearPortalWindow(ret);
+   R_ClearPortalWindow(ret, noplanes);
    
    return ret;
 }
@@ -320,7 +340,7 @@ static void R_CreateChildWindow(pwindow_t *parent)
       I_Error("R_CreateChildWindow: child portal displaced\n");
 #endif
 
-   auto child = newPortalWindow();
+   auto child = newPortalWindow(true);
 
    parent->child   = child;
    child->head     = parent->head;
@@ -723,6 +743,7 @@ void R_InitPortals()
 {
    portals = last = NULL;
    windowhead = unusedhead = windowlast = NULL;
+   R_MapInitOverlaySets();
 
    gPortals.clear(); // clear the portal list
 }
@@ -771,8 +792,8 @@ static void R_RenderPlanePortal(pwindow_t *window)
       }
    }
 
-   if(window->head == window && window->portal->poverlay)
-      R_PushPost(false, window->portal->poverlay);
+   if(window->head == window && window->poverlay)
+      R_PushPost(false, window);
       
    if(window->child)
       R_RenderPlanePortal(window->child);
@@ -862,8 +883,8 @@ static void R_RenderHorizonPortal(pwindow_t *window)
    view.y = M_FixedToFloat(viewy);
    view.z = M_FixedToFloat(viewz);
 
-   if(window->head == window && window->portal->poverlay)
-      R_PushPost(false, window->portal->poverlay);
+   if(window->head == window && window->poverlay)
+      R_PushPost(false, window);
       
    if(window->child)
       R_RenderHorizonPortal(window->child);
@@ -958,7 +979,7 @@ static void R_RenderSkyboxPortal(pwindow_t *window)
    R_RenderBSPNode(numnodes - 1);
    
    // Only push the overlay if this is the head window
-   R_PushPost(true, window->head == window ? window->portal->poverlay : NULL);
+   R_PushPost(true, window->head == window ? window : NULL);
 
    floorclip   = floorcliparray;
    ceilingclip = ceilingcliparray;
@@ -1138,6 +1159,8 @@ static void R_RenderAnchoredPortal(pwindow_t *window)
    view.z = static_cast<float>(vz);
 
    viewangle = window->vangle + static_cast<angle_t>(tr.angle * ANG180 / PI);
+   viewsin = finesine[viewangle >> ANGLETOFINESHIFT];
+   viewcos = finecosine[viewangle >> ANGLETOFINESHIFT];
    view.angle = (ANG90 - viewangle) * PI / ANG180;
    view.sin = sinf(view.angle);
    view.cos = cosf(view.angle);
@@ -1146,7 +1169,7 @@ static void R_RenderAnchoredPortal(pwindow_t *window)
    R_RenderBSPNode(numnodes - 1);
 
    // Only push the overlay if this is the head window
-   R_PushPost(true, window->head == window ? window->portal->poverlay : NULL);
+   R_PushPost(true, window->head == window ? window : NULL);
 
    floorclip = floorcliparray;
    ceilingclip = ceilingcliparray;
@@ -1155,6 +1178,8 @@ static void R_RenderAnchoredPortal(pwindow_t *window)
    viewy  = lasty;
    viewz  = lastz;
    viewangle = lastangle;
+   viewsin = finesine[viewangle >> ANGLETOFINESHIFT];
+   viewcos = finecosine[viewangle >> ANGLETOFINESHIFT];
    view.x = lastxf;
    view.y = lastyf;
    view.z = lastzf;
@@ -1170,7 +1195,9 @@ static void R_RenderAnchoredPortal(pwindow_t *window)
 static void R_RenderLinkedPortal(pwindow_t *window)
 {
    fixed_t lastx, lasty, lastz;
+   angle_t lastangle;
    float   lastxf, lastyf, lastzf;
+   float   lastanglef;
    portal_t *portal = window->portal;
 
    if(portal->type != R_LINKED || window->maxx < window->minx)
@@ -1227,6 +1254,8 @@ static void R_RenderLinkedPortal(pwindow_t *window)
    lastxf = view.x;
    lastyf = view.y;
    lastzf = view.z;
+   lastangle = viewangle;
+   lastanglef = view.angle;
 
    // SoM 3/10/2005: Use the coordinates stored in the portal struct
    viewx  = window->vx + portal->data.link.deltax;
@@ -1236,11 +1265,21 @@ static void R_RenderLinkedPortal(pwindow_t *window)
    view.y = M_FixedToFloat(viewy);
    view.z = M_FixedToFloat(viewz);
 
+   if(window->vangle != viewangle)
+   {
+      viewangle = window->vangle;
+      viewsin = finesine[viewangle >> ANGLETOFINESHIFT];
+      viewcos = finecosine[viewangle >> ANGLETOFINESHIFT];
+      view.angle = (ANG90 - viewangle) * PI / ANG180;
+      view.sin = sinf(view.angle);
+      view.cos = cosf(view.angle);
+   }
+
    R_IncrementFrameid();
    R_RenderBSPNode(numnodes - 1);
 
    // Only push the overlay if this is the head window
-   R_PushPost(true, window->head == window ? window->portal->poverlay : NULL);
+   R_PushPost(true, window->head == window ? window : NULL);
 
    floorclip = floorcliparray;
    ceilingclip = ceilingcliparray;
@@ -1248,9 +1287,15 @@ static void R_RenderLinkedPortal(pwindow_t *window)
    viewx  = lastx;
    viewy  = lasty;
    viewz  = lastz;
+   viewangle = lastangle;
+   viewsin = finesine[viewangle >> ANGLETOFINESHIFT];
+   viewcos = finecosine[viewangle >> ANGLETOFINESHIFT];
    view.x = lastxf;
    view.y = lastyf;
    view.z = lastzf;
+   view.angle = lastanglef;
+   view.sin = (float)sin(view.angle);
+   view.cos = (float)cos(view.angle);
 
    if(window->child)
       R_RenderLinkedPortal(window->child);
@@ -1327,7 +1372,7 @@ pwindow_t *R_GetFloorPortalWindow(portal_t *portal, fixed_t planez)
       // being able to share a single window set.
       // ioanch: also added plane checks
       if(rover->portal == portal && rover->type == pw_floor &&
-         rover->planez == planez && !rover->up)
+         rover->planez == planez)
       {
          return rover;
       }
@@ -1338,7 +1383,6 @@ pwindow_t *R_GetFloorPortalWindow(portal_t *portal, fixed_t planez)
    // not found, so make it
    pwindow_t *window = R_NewPortalWindow(portal, NULL, pw_floor);
    window->planez = planez;
-   window->up = false;
    M_ClearBox(window->barrier.bbox);
 
    return window;
@@ -1351,7 +1395,7 @@ pwindow_t *R_GetCeilingPortalWindow(portal_t *portal, fixed_t planez)
    while(rover)
    {
       if(rover->portal == portal && rover->type == pw_ceiling &&
-         rover->planez == planez && rover->up)
+         rover->planez == planez)
       {
          return rover;
       }
@@ -1362,7 +1406,6 @@ pwindow_t *R_GetCeilingPortalWindow(portal_t *portal, fixed_t planez)
    // not found, so make it
    pwindow_t *window = R_NewPortalWindow(portal, NULL, pw_ceiling);
    window->planez = planez;
-   window->up = true;
    M_ClearBox(window->barrier.bbox);
 
    return window;
@@ -1383,6 +1426,24 @@ pwindow_t *R_GetLinePortalWindow(portal_t *portal, line_t *line)
 
    // not found, so make it
    return R_NewPortalWindow(portal, line, pw_line);
+}
+
+//
+// Moves portal overlay to window, clearing data from portal.
+//
+void R_MovePortalOverlayToWindow(bool isceiling)
+{
+//   const portal_t *portal = isceiling ? seg.c_portal : seg.f_portal;
+   pwindow_t *window = isceiling ? seg.c_window : seg.f_window;
+   visplane_t *&plane = isceiling ? seg.ceilingplane : seg.floorplane;
+   if(plane)
+   {
+      plane = R_FindPlane(plane->height, plane->picnum, plane->lightlevel,
+         plane->xoffs, plane->yoffs, plane->xscale, plane->yscale, plane->angle,
+         plane->pslope, plane->bflags, plane->opacity, window->head->poverlay);
+   }
+//   if(portal)
+//      R_ClearPlaneHash(portal->poverlay);
 }
 
 //
@@ -1415,15 +1476,20 @@ void R_RenderPortals()
       portalrender.active = true;
       portalrender.w = windowhead;
       portalrender.segClipFunc = windowhead->clipfunc;
-      portalrender.overlay = windowhead->portal->poverlay;
+//      portalrender.overlay = windowhead->portal->poverlay;
 
       if(windowhead->maxx >= windowhead->minx)
          windowhead->func(windowhead);
+      else if(windowhead->poverlay)
+      {
+         R_FreeOverlaySet(windowhead->poverlay);
+         windowhead->poverlay = nullptr;
+      }
 
       portalrender.active = false;
       portalrender.w = NULL;
       portalrender.segClipFunc = NULL;
-      portalrender.overlay = NULL;
+//      portalrender.overlay = NULL;
 
       // free the window structs
       w = windowhead->child;
@@ -1901,7 +1967,8 @@ static void R_findPairPortalLines(line_t &line)
          offset = *(blockmap + offset);
          const int *list = blockmaplump + offset;
 
-         ++list;
+         if(skipblstart)
+            ++list;
          for(; *list != -1; ++list)
          {
             if(*list >= numlines || *list < 0)

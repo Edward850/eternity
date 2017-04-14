@@ -1202,13 +1202,25 @@ static void R_2S_Sloped(float pstep, float i1, float i2, float textop,
          && seg.backsec->c_portal != NULL 
          && (seg.frontsec->c_pflags & PS_BLENDFLAGS) != (seg.backsec->c_pflags & PS_BLENDFLAGS);
 
-   if(seg.c_portal &&
-      (seg.clipsolid || heightchange || 
-       seg.frontsec->c_portal != seg.backsec->c_portal))
+   if(seg.c_portal)
    {
-      seg.markflags |= SEG_MARKCPORTAL;
-      seg.c_window   = R_GetCeilingPortalWindow(seg.frontsec->c_portal,
-                                                seg.frontsec->ceilingheight);
+      if(seg.clipsolid || heightchange ||
+         seg.frontsec->c_portal != seg.backsec->c_portal)
+      {
+         seg.markflags |= SEG_MARKCPORTAL;
+         seg.c_window   = R_GetCeilingPortalWindow(seg.frontsec->c_portal,
+                                                   seg.frontsec->ceilingheight);
+         R_MovePortalOverlayToWindow(true);
+      }
+      else if(!heightchange && seg.frontsec->c_portal == seg.backsec->c_portal)
+      {
+         seg.c_window   = R_GetCeilingPortalWindow(seg.frontsec->c_portal,
+                                                   seg.frontsec->ceilingheight);
+         R_MovePortalOverlayToWindow(true);
+         seg.c_window = nullptr;
+      }
+      else
+         seg.c_window = nullptr;
    }
    else
       seg.c_window   = NULL;
@@ -1236,9 +1248,9 @@ static void R_2S_Sloped(float pstep, float i1, float i2, float textop,
    bool havetportal = seg.backsec && seg.backsec->c_portal &&
          seg.line->linedef->extflags & EX_ML_UPPERPORTAL;
 
-   bool toohigh = havetportal && portalrender.w && !portalrender.w->up &&
-         !portalrender.w->line &&
-         portalrender.w->planez <= seg.backsec->ceilingheight;
+   bool toohigh = havetportal && portalrender.w &&
+   portalrender.w->type == pw_floor &&
+   portalrender.w->planez <= seg.backsec->ceilingheight;
 
    if(!toohigh && !havetportal && heightchange && 
       !(seg.frontsec->intflags & SIF_SKY && seg.backsec->intflags & SIF_SKY) && 
@@ -1271,14 +1283,26 @@ static void R_2S_Sloped(float pstep, float i1, float i2, float textop,
    markblend = seg.frontsec->f_portal != NULL 
          && seg.backsec->f_portal != NULL 
          && (seg.frontsec->f_pflags & PS_BLENDFLAGS) != (seg.backsec->f_pflags & PS_BLENDFLAGS);
-         
-   if(seg.f_portal &&
-      (seg.clipsolid || heightchange ||
-       seg.frontsec->f_portal != seg.backsec->f_portal))
+
+   if(seg.f_portal)
    {
-      seg.markflags |= SEG_MARKFPORTAL;
-      seg.f_window   = R_GetFloorPortalWindow(seg.frontsec->f_portal,
-                                              seg.frontsec->floorheight);
+      if(seg.clipsolid || heightchange ||
+         seg.frontsec->f_portal != seg.backsec->f_portal)
+      {
+         seg.markflags |= SEG_MARKFPORTAL;
+         seg.f_window   = R_GetFloorPortalWindow(seg.frontsec->f_portal,
+                                                 seg.frontsec->floorheight);
+         R_MovePortalOverlayToWindow(false);
+      }
+      else if(!heightchange && seg.frontsec->f_portal == seg.backsec->f_portal)
+      {
+         seg.f_window   = R_GetFloorPortalWindow(seg.frontsec->f_portal,
+                                                 seg.frontsec->floorheight);
+         R_MovePortalOverlayToWindow(false);
+         seg.f_window = nullptr;
+      }
+      else
+         seg.f_window = nullptr;
    }
    else
       seg.f_window = NULL;
@@ -1324,9 +1348,9 @@ static void R_2S_Sloped(float pstep, float i1, float i2, float textop,
 
    bool havebportal = seg.backsec && seg.backsec->f_portal &&
          seg.line->linedef->extflags & EX_ML_LOWERPORTAL;
-   bool toolow = havebportal && portalrender.w && portalrender.w->up &&
-         !portalrender.w->line &&
-         portalrender.w->planez >= seg.backsec->floorheight;
+   bool toolow = havebportal && portalrender.w &&
+   portalrender.w->type == pw_ceiling &&
+   portalrender.w->planez >= seg.backsec->floorheight;
 
    // SoM: Get this from the actual sector because R_FakeFlat can mess with heights.
 
@@ -1459,23 +1483,38 @@ static void R_2S_Normal(float pstep, float i1, float i2, float textop,
       seg.markflags |= seg.c_portal ? SEG_MARKCOVERLAY : 
                     seg.ceilingplane ? SEG_MARKCEILING : 0;
    }
-   
-   if(seg.c_portal && 
-      (seg.clipsolid || seg.frontsec->ceilingheight != seg.backsec->ceilingheight || 
-       seg.frontsec->c_portal != seg.backsec->c_portal))
+
+   if(seg.c_portal)
    {
-      seg.markflags |= SEG_MARKCPORTAL;
-      seg.c_window   = R_GetCeilingPortalWindow(seg.frontsec->c_portal,
-                                                seg.frontsec->ceilingheight);
+      if(seg.clipsolid ||
+         seg.frontsec->ceilingheight != seg.backsec->ceilingheight ||
+         seg.frontsec->c_portal != seg.backsec->c_portal)
+      {
+         seg.markflags |= SEG_MARKCPORTAL;
+         seg.c_window   = R_GetCeilingPortalWindow(seg.frontsec->c_portal,
+                                                   seg.frontsec->ceilingheight);
+         R_MovePortalOverlayToWindow(true);
+      }
+      else if(seg.frontsec->c_portal == seg.backsec->c_portal &&
+              seg.frontsec->ceilingheight == seg.backsec->ceilingheight)
+      {
+         // We need to do this just to transfer the plane
+         seg.c_window = R_GetCeilingPortalWindow(seg.frontsec->c_portal,
+                                                 seg.frontsec->ceilingheight);
+         R_MovePortalOverlayToWindow(true);
+         seg.c_window = nullptr;
+      }
+      else
+         seg.c_window = nullptr;
    }
    else
       seg.c_window = NULL;
 
    bool havetportal = seg.backsec && seg.backsec->c_portal &&
          seg.line->linedef->extflags & EX_ML_UPPERPORTAL;
-   bool toohigh = havetportal && portalrender.w && !portalrender.w->up &&
-         !portalrender.w->line &&
-         portalrender.w->planez <= seg.backsec->ceilingheight;
+   bool toohigh = havetportal && portalrender.w &&
+   portalrender.w->type == pw_floor &&
+   portalrender.w->planez <= seg.backsec->ceilingheight;
 
    if(!toohigh && !havetportal &&
       seg.frontsec->ceilingheight > seg.backsec->ceilingheight &&
@@ -1527,13 +1566,28 @@ static void R_2S_Normal(float pstep, float i1, float i2, float textop,
                        seg.floorplane ? SEG_MARKFLOOR : 0;
    }
    
-   if(seg.f_portal &&
-      (seg.clipsolid || seg.frontsec->floorheight != seg.backsec->floorheight ||
-       seg.frontsec->f_portal != seg.backsec->f_portal))
+   if(seg.f_portal)
    {
-      seg.markflags |= SEG_MARKFPORTAL;
-      seg.f_window   = R_GetFloorPortalWindow(seg.frontsec->f_portal,
-                                              seg.frontsec->floorheight);
+      if(seg.clipsolid ||
+         seg.frontsec->floorheight != seg.backsec->floorheight ||
+         seg.frontsec->f_portal != seg.backsec->f_portal)
+      {
+         seg.markflags |= SEG_MARKFPORTAL;
+         seg.f_window   = R_GetFloorPortalWindow(seg.frontsec->f_portal,
+                                                 seg.frontsec->floorheight);
+         R_MovePortalOverlayToWindow(false);
+      }
+      else if(seg.frontsec->floorheight == seg.backsec->floorheight &&
+              seg.frontsec->f_portal == seg.backsec->f_portal)
+      {
+         // We need to do this just to transfer the plane
+         seg.f_window = R_GetFloorPortalWindow(seg.frontsec->f_portal,
+                                               seg.frontsec->floorheight);
+         R_MovePortalOverlayToWindow(false);
+         seg.f_window = nullptr;
+      }
+      else
+         seg.f_window = nullptr;
    }
    else
       seg.f_window = NULL;
@@ -1565,9 +1619,9 @@ static void R_2S_Normal(float pstep, float i1, float i2, float textop,
    // current plane-z window. Necessary for edge portals
    bool havebportal = seg.backsec && seg.backsec->f_portal &&
          seg.line->linedef->extflags & EX_ML_LOWERPORTAL;
-   bool toolow = havebportal && portalrender.w && portalrender.w->up &&
-         !portalrender.w->line &&
-         portalrender.w->planez >= seg.backsec->floorheight;
+   bool toolow = havebportal && portalrender.w &&
+   portalrender.w->type == pw_ceiling &&
+   portalrender.w->planez >= seg.backsec->floorheight;
 
    // SoM: Get this from the actual sector because R_FakeFlat can mess with heights.
 
@@ -2041,6 +2095,7 @@ static void R_AddLine(seg_t *line, bool dynasegs)
          seg.markflags |= SEG_MARKCPORTAL;
          seg.c_window   = R_GetCeilingPortalWindow(seg.frontsec->c_portal,
                                                    seg.frontsec->ceilingheight);
+         R_MovePortalOverlayToWindow(true);
       }
 
       if(seg.frontsec->f_portal && (seg.frontsec->f_portal->type < R_TWOWAY ||
@@ -2049,6 +2104,7 @@ static void R_AddLine(seg_t *line, bool dynasegs)
          seg.markflags |= SEG_MARKFPORTAL;
          seg.f_window   = R_GetFloorPortalWindow(seg.frontsec->f_portal,
                                                  seg.frontsec->floorheight);
+         R_MovePortalOverlayToWindow(false);
       }
 
       if(seg.ceilingplane != NULL)
@@ -2356,10 +2412,10 @@ static void R_Subsector(int num)
 
    // ioanch: reject all sectors fully above or below a sector portal.
    if(portalrender.active && portalrender.w->portal->type != R_SKYBOX &&
-      !portalrender.w->line && ((portalrender.w->up &&
-         seg.frontsec->ceilingheight < portalrender.w->planez) ||
-         (!portalrender.w->up && 
-            seg.frontsec->floorheight > portalrender.w->planez)))
+      ((portalrender.w->type == pw_ceiling &&
+        seg.frontsec->ceilingheight < portalrender.w->planez) ||
+       (portalrender.w->type == pw_floor &&
+        seg.frontsec->floorheight > portalrender.w->planez)))
    {
       return;
    }
