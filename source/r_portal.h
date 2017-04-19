@@ -161,6 +161,8 @@ struct horizondata_t
    fixed_t *ceilingxoff, *ceilingyoff;
    float   *floorbaseangle, *floorangle;     // haleyjd 01/05/08: flat angles
    float   *ceilingbaseangle, *ceilingangle;
+   const float   *floorxscale, *flooryscale;
+   const float   *ceilingxscale, *ceilingyscale;
 };
 
 
@@ -172,6 +174,7 @@ struct skyplanedata_t
    int16_t *lightlevel;
    fixed_t *xoff, *yoff;
    float   *baseangle, *angle; // haleyjd 01/05/08: angles
+   const float *xscale, *yscale;
 };
 
 
@@ -224,11 +227,13 @@ portal_t *R_GetHorizonPortal(int *floorpic, int *ceilingpic,
                              fixed_t *floorxoff, fixed_t *flooryoff, 
                              fixed_t *ceilingxoff, fixed_t *ceilingyoff,
                              float *floorbaseangle, float *floorangle,
-                             float *ceilingbaseangle, float *ceilingangle);
+                             float *ceilingbaseangle, float *ceilingangle,
+                             const float *floorxscale, const float *flooryscale,
+                             const float *ceilingxscale, const float *ceilingyscale);
 
 portal_t *R_GetPlanePortal(int *pic, fixed_t *delta, int16_t *lightlevel, 
                            fixed_t *xoff, fixed_t *yoff, float *baseangle,
-                           float *angle);
+                           float *angle, const float *xscale, const float *yscale);
 
 void R_MovePortalOverlayToWindow(bool isceiling);
 void R_ClearPortals();
@@ -238,6 +243,10 @@ portal_t *R_GetLinkedPortal(int markerlinenum, int anchorlinenum,
                             fixed_t planez, int fromid, int toid);
 
 void R_CalcRenderBarrier(pwindow_t &window, const sectorbox_t &box);
+
+bool R_IsSkyLikePortalCeiling(const sector_t &sector);
+bool R_IsSkyLikePortalFloor(const sector_t &sector);
+bool R_IsSkyLikePortalWall(const line_t &line);
 
 //=============================================================================
 //
